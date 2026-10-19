@@ -1,0 +1,7 @@
+src/bin/
+src/obj/
+*.tmp
+*.pdb
+*.lnk
+App/self-test.json
+App/ui-preview.png
