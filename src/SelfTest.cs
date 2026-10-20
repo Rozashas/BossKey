@@ -41,10 +41,14 @@ internal static class SelfTest
                         Check(targets.All(window => !Native.IsWindowVisible(window.Handle)), "All test windows hidden", checks);
                         // 숨긴 동안 대상 프로그램이 위치를 바꾸는 상황도 재현합니다.
                         Check(Native.SetWindowPos(normal.Handle, 0, area.Left + 170, area.Top + 150, 540, 300, 0x0214), "Simulate hidden window reposition", checks);
+                        Native.SetWindowPos(host.Handle, 0, 0, 0, 0, 0, 0x0213);
                         manager.RestoreAll();
                         await Task.Delay(150);
                         Check(!manager.IsHidden && Native.GetWindowRect(normal.Handle, out Native.Rect actual) && actual.Equals(original), "Restore exact screen position and size", checks);
                         Check(Native.IsZoomed(maximized.Handle) && Native.IsIconic(minimized.Handle), "Preserve maximized and minimized states", checks);
+                        List<nint> order = [];
+                        Native.EnumWindows((window, _) => { order.Add(window); return true; }, 0);
+                        Check(order.IndexOf(normal.Handle) < order.IndexOf(host.Handle) && order.IndexOf(maximized.Handle) < order.IndexOf(host.Handle), "Restored windows are in front of the covering test window", checks);
                     }
                 }
                 exitCode = 0;

@@ -55,7 +55,9 @@ internal sealed class WindowManager
 
     internal void RestoreAll()
     {
-        foreach (HiddenWindow saved in hidden.Values.ToArray())
+        nint foreground = 0;
+        // EnumWindows는 앞쪽 창부터 반환합니다. 뒤쪽부터 올려 기존 겹침 순서를 유지합니다.
+        foreach (HiddenWindow saved in hidden.Values.Reverse().ToArray())
         {
             if (!Matches(saved.Window)) { hidden.Remove(saved.Window.Handle); continue; }
             Native.Placement placement = saved.Placement;
@@ -70,8 +72,15 @@ internal sealed class WindowManager
                     bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, flags) && restored;
                 restored = Native.GetWindowRect(saved.Window.Handle, out Native.Rect actual) && actual.Equals(bounds) && restored;
             }
+            if (!Native.IsIconic(saved.Window.Handle))
+            {
+                const uint frontFlags = 0x0001 | 0x0002 | 0x0010 | 0x0200; // 크기·위치 유지, 비활성 상태로 HWND_TOP에 올림
+                restored = Native.SetWindowPos(saved.Window.Handle, 0, 0, 0, 0, 0, frontFlags) && restored;
+                foreground = saved.Window.Handle;
+            }
             if (restored && Native.IsWindowVisible(saved.Window.Handle)) hidden.Remove(saved.Window.Handle);
         }
+        if (foreground != 0) Native.SetForegroundWindow(foreground);
     }
 
     private static bool Matches(AppWindow window)
