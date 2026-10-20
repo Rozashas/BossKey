@@ -5,6 +5,67 @@ namespace BossKey;
 
 internal static class SelfTest
 {
+    internal static int RunPositionTest()
+    {
+        List<string> checks = [];
+        int exitCode = 1;
+        using Form host = new() { Text = "BossKey position validation", ShowInTaskbar = false, Width = 240, Height = 100 };
+        host.Shown += async (_, _) =>
+        {
+            Process? helper = null;
+            WindowManager manager = new();
+            try
+            {
+                helper = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--test-window") { UseShellExecute = false });
+                if (helper == null) throw new Exception("Helper launch failed");
+                List<AppWindow> targets = [];
+                for (int attempt = 0; attempt < 40; attempt++)
+                {
+                    await Task.Delay(100);
+                    targets = WindowManager.GetWindows().Where(window => window.ProcessId == helper.Id).ToList();
+                    if (targets.Count == 3) break;
+                }
+                Check(targets.Count == 3, "Find dedicated test windows", checks);
+                AppWindow normal = targets.Single(window => window.Title.EndsWith("Normal"));
+                AppWindow maximized = targets.Single(window => window.Title.EndsWith("Maximized"));
+                AppWindow minimized = targets.Single(window => window.Title.EndsWith("Minimized"));
+                foreach (Screen screen in Screen.AllScreens)
+                {
+                    Rectangle area = screen.WorkingArea;
+                    Check(Native.SetWindowPos(normal.Handle, 0, area.Left + 40, area.Top + 50, 450, 250, 0x0214), "Place test window on " + screen.DeviceName, checks);
+                    await Task.Delay(120);
+                    Check(Native.GetWindowRect(normal.Handle, out Native.Rect original), "Read screen bounds", checks);
+                    for (int cycle = 0; cycle < 3; cycle++)
+                    {
+                        Check(manager.HideSelected(targets.Select(window => window.Program), helper.Id) == 3, "Hide dedicated windows", checks);
+                        Check(targets.All(window => !Native.IsWindowVisible(window.Handle)), "All test windows hidden", checks);
+                        // 숨긴 동안 대상 프로그램이 위치를 바꾸는 상황도 재현합니다.
+                        Check(Native.SetWindowPos(normal.Handle, 0, area.Left + 170, area.Top + 150, 540, 300, 0x0214), "Simulate hidden window reposition", checks);
+                        manager.RestoreAll();
+                        await Task.Delay(150);
+                        Check(!manager.IsHidden && Native.GetWindowRect(normal.Handle, out Native.Rect actual) && actual.Equals(original), "Restore exact screen position and size", checks);
+                        Check(Native.IsZoomed(maximized.Handle) && Native.IsIconic(minimized.Handle), "Preserve maximized and minimized states", checks);
+                    }
+                }
+                exitCode = 0;
+            }
+            catch (Exception error) { checks.Add("FAIL: " + error); }
+            finally
+            {
+                manager.RestoreAll();
+                if (helper != null)
+                {
+                    if (!helper.HasExited) helper.Kill(true);
+                    helper.Dispose();
+                }
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "position-test.json"), JsonSerializer.Serialize(new { passed = exitCode == 0, monitorCount = Screen.AllScreens.Length, checks }, new JsonSerializerOptions { WriteIndented = true }));
+                host.Close();
+            }
+        };
+        Application.Run(host);
+        return exitCode;
+    }
+
     internal static int Run()
     {
         List<string> checks = [];
@@ -96,6 +157,11 @@ internal static class SelfTest
                 preview.DrawToBitmap(screenshot, new Rectangle(Point.Empty, screenshot.Size));
                 screenshot.Save(Path.Combine(AppContext.BaseDirectory, "ui-preview.png"));
                 preview.Close();
+                Check(!preview.IsDisposed && !preview.Visible, "Close button hides settings without exiting", checks);
+                preview.Show();
+                Check(preview.Visible, "Settings can reopen after close-to-tray", checks);
+                preview.ExitApplication();
+                Check(preview.IsDisposed, "Explicit tray exit closes the settings form", checks);
                 checks.Add("PASS: Main settings form renders");
                 exitCode = 0;
             }

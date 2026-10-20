@@ -8,6 +8,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if (args.Contains("--position-test")) return SelfTest.RunPositionTest();
         if (args.Contains("--self-test")) return SelfTest.Run();
         if (args.Contains("--test-window"))
         {
@@ -53,6 +54,7 @@ internal sealed class MainForm : Form
     private readonly ContextMenuStrip trayMenu = new();
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private bool refreshing;
+    private bool exitRequested;
 
     internal MainForm()
     {
@@ -73,7 +75,7 @@ internal sealed class MainForm : Form
         trayMenu.Items.Add("숨기기 / 복원", null, (_, _) => ToggleWindows());
         trayMenu.Items.Add("모든 창 복원", null, (_, _) => RestoreWindows());
         trayMenu.Items.Add(new ToolStripSeparator());
-        trayMenu.Items.Add("종료 (창 복원)", null, (_, _) => Close());
+        trayMenu.Items.Add("종료 (창 복원)", null, (_, _) => ExitApplication());
         tray = new() { Icon = Icon, Text = "BossKey · " + settings.Hotkey, ContextMenuStrip = trayMenu, Visible = true };
         tray.DoubleClick += (_, _) => OpenSettings();
         refreshTimer.Tick += (_, _) => { if (!windows.IsHidden) RefreshPrograms(); };
@@ -129,7 +131,7 @@ internal sealed class MainForm : Form
         toggle.Click += (_, _) => ToggleWindows();
         actions.Controls.Add(toggle);
         actions.Controls.Add(MakeButton("모든 창 복원", RestoreWindows, 160));
-        actions.Controls.Add(MakeButton("트레이로 보내기", () => Hide(), 170));
+        actions.Controls.Add(MakeButton("트레이로 보내기", HideToTray, 170));
         layout.Controls.Add(actions);
         status.Dock = DockStyle.Fill; status.TextAlign = ContentAlignment.MiddleLeft;
         layout.Controls.Add(status);
@@ -248,6 +250,19 @@ internal sealed class MainForm : Form
         Show(); WindowState = FormWindowState.Normal; Activate();
     }
 
+    private void HideToTray()
+    {
+        keyboard.Capturing = false;
+        capture.Text = "단축키 변경";
+        Hide();
+    }
+
+    internal void ExitApplication()
+    {
+        exitRequested = true;
+        Close();
+    }
+
     private void SetStatus(string text) => status.Text = text;
 
     private void OnThreadException(object sender, ThreadExceptionEventArgs args)
@@ -258,11 +273,19 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        if (e.CloseReason == CloseReason.UserClosing && !exitRequested)
+        {
+            e.Cancel = true;
+            HideToTray();
+            base.OnFormClosing(e);
+            return;
+        }
         keyboard.Capturing = false;
         windows.RestoreAll();
         if (windows.IsHidden && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
+            exitRequested = false;
             SetStatus("일부 창 복원 실패. 권한 확인 후 재시도 필요.");
         }
         base.OnFormClosing(e);

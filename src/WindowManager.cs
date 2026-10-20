@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace BossKey;
 
 internal sealed record AppWindow(nint Handle, int ProcessId, long StartTicks, string Program, string Title);
-internal sealed record HiddenWindow(AppWindow Window, Native.Placement Placement);
+internal sealed record HiddenWindow(AppWindow Window, Native.Placement Placement, Native.Rect? Bounds);
 
 internal sealed class WindowManager
 {
@@ -43,7 +43,10 @@ internal sealed class WindowManager
             if (!selected.Contains(window.Program) || hidden.ContainsKey(window.Handle) || (onlyProcess != null && window.ProcessId != onlyProcess)) continue;
             Native.Placement placement = new() { Length = Marshal.SizeOf<Native.Placement>() };
             if (!Native.GetWindowPlacement(window.Handle, ref placement)) continue;
-            hidden.Add(window.Handle, new(window, placement));
+            Native.Rect? bounds = null;
+            if (!Native.IsIconic(window.Handle) && !Native.IsZoomed(window.Handle) && Native.GetWindowRect(window.Handle, out Native.Rect rect))
+                bounds = rect;
+            hidden.Add(window.Handle, new(window, placement, bounds));
             Native.ShowWindow(window.Handle, 0);
             if (Native.IsWindowVisible(window.Handle)) hidden.Remove(window.Handle);
         }
@@ -56,9 +59,18 @@ internal sealed class WindowManager
         {
             if (!Matches(saved.Window)) { hidden.Remove(saved.Window.Handle); continue; }
             Native.Placement placement = saved.Placement;
-            Native.SetWindowPlacement(saved.Window.Handle, ref placement);
+            bool restored = Native.SetWindowPlacement(saved.Window.Handle, ref placement);
             Native.ShowWindow(saved.Window.Handle, placement.ShowCommand == 3 ? 3 : placement.ShowCommand == 2 ? 2 : 8);
-            if (Native.IsWindowVisible(saved.Window.Handle)) hidden.Remove(saved.Window.Handle);
+            // NormalPosition은 작업 영역 좌표입니다. 실제 화면 좌표는 별도로 저장해
+            // 창이 다시 표시되며 위치·크기를 바꾸는 경우에도 숨기기 직전 상태로 맞춥니다.
+            if (saved.Bounds is Native.Rect bounds)
+            {
+                const uint flags = 0x0004 | 0x0010 | 0x0200; // Z순서·활성 창·소유 창 순서 유지
+                restored = Native.SetWindowPos(saved.Window.Handle, 0, bounds.Left, bounds.Top,
+                    bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, flags) && restored;
+                restored = Native.GetWindowRect(saved.Window.Handle, out Native.Rect actual) && actual.Equals(bounds) && restored;
+            }
+            if (restored && Native.IsWindowVisible(saved.Window.Handle)) hidden.Remove(saved.Window.Handle);
         }
     }
 

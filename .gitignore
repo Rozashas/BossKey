@@ -5,3 +5,6 @@ src/obj/
 *.lnk
 App/self-test.json
 App/ui-preview.png
+App/position-test.json
+App/BossKey.updated.exe
+_backups/
